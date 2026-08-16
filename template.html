@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEO STRIKE 量子突击 · 科幻射击</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #03050c;
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    user-select: none; -webkit-user-select: none;
+  }
+  #game { position: fixed; inset: 0; }
+  #game canvas { display: block; }
+  .hidden { display: none !important; }
+
+  /* 扫描线氛围层 */
+  #scanlines {
+    position: fixed; inset: 0; z-index: 5; pointer-events: none; opacity: .05;
+    background: repeating-linear-gradient(0deg, rgba(120,240,255,.5) 0px, rgba(120,240,255,0) 1px, rgba(120,240,255,0) 3px);
+  }
+
+  /* ---------------- HUD ---------------- */
+  #hud { display: none; }
+  #hud.show { display: block; }
+
+  /* 准星(霓虹四角) */
+  #crosshair {
+    position: fixed; left: 50%; top: 50%; z-index: 10;
+    width: 22px; height: 22px; margin: -11px 0 0 -11px;
+    pointer-events: none; transition: transform .09s ease-out;
+  }
+  #crosshair::before, #crosshair::after,
+  #crosshair .tick { content: ''; position: absolute; background: rgba(90,240,255,.95); box-shadow: 0 0 6px rgba(60,220,255,.9); }
+  #crosshair::before { width: 2px; height: 7px; left: 10px; top: 0; }
+  #crosshair::after  { width: 2px; height: 7px; left: 10px; bottom: 0; }
+  #crosshair .tick.tl { width: 7px; height: 2px; left: 0; top: 10px; }
+  #crosshair .tick.tr { width: 7px; height: 2px; right: 0; top: 10px; }
+  #crosshair-dot {
+    position: absolute; width: 3px; height: 3px; left: 9.5px; top: 9.5px;
+    background: rgba(90,240,255,.95); border-radius: 50%;
+    box-shadow: 0 0 5px rgba(60,220,255,.9);
+  }
+  #crosshair.fire { transform: scale(1.4); }
+
+  /* 命中标记 */
+  #hitmarker {
+    position: fixed; left: 50%; top: 50%; width: 26px; height: 26px;
+    margin: -13px 0 0 -13px; z-index: 10; pointer-events: none;
+    opacity: 0; transition: opacity .06s; transform: rotate(45deg);
+  }
+  #hitmarker::before, #hitmarker::after {
+    content: ''; position: absolute; background: #6ff0ff;
+    box-shadow: 0 0 6px rgba(80,230,255,.95);
+  }
+  #hitmarker::before { width: 2px; height: 26px; left: 12px; top: 0; }
+  #hitmarker::after  { width: 26px; height: 2px; left: 0; top: 12px; }
+  #hitmarker.show { opacity: .95; }
+  #hitmarker.kill::before, #hitmarker.kill::after { background: #ff3d6a; box-shadow: 0 0 8px rgba(255,60,110,.95); }
+
+  /* 开镜瞄准遮罩(右键) */
+  #scope {
+    position: fixed; inset: 0; z-index: 9; pointer-events: none; opacity: 0;
+    transition: opacity .12s;
+    background: radial-gradient(circle at center,
+      rgba(0,0,0,0) 0 33%,
+      rgba(2,8,18,.35) 35%,
+      rgba(2,8,18,.88) 100%);
+  }
+  #scope.show { opacity: 1; }
+
+  /* Boss 全图指示光标(屏幕空间,始终可见) */
+  #boss-marker {
+    position: fixed; z-index: 12; pointer-events: none;
+    color: #ff3d6a; font-size: 24px; font-weight: bold; letter-spacing: 2px;
+    text-shadow: 0 0 14px rgba(255,60,130,1), 0 0 34px rgba(255,60,130,.8), 0 2px 4px rgba(0,0,0,.95);
+    animation: bossmark 0.9s infinite;
+    white-space: nowrap;
+  }
+  @keyframes bossmark { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+
+  /* 暗角与受伤红屏 */
+  #vignette-static {
+    position: fixed; inset: 0; pointer-events: none; z-index: 8;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(2,8,18,.55) 100%);
+  }
+  #vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 9; opacity: 0;
+    background: radial-gradient(ellipse at center, rgba(255,0,60,0) 45%, rgba(255,30,90,.55) 100%);
+  }
+
+  /* 底部提示 */
+  #hint {
+    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    color: rgba(140,220,255,.55); font-size: 12px; letter-spacing: 2px;
+    z-index: 10; pointer-events: none; white-space: nowrap;
+    text-shadow: 0 0 8px rgba(40,180,255,.5);
+  }
+
+  /* 关卡信息(顶部居中) */
+  #level-panel { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; z-index: 10; }
+  #level-title {
+    color: #8df4ff; font-size: 16px; font-weight: bold; letter-spacing: 3px;
+    text-shadow: 0 0 12px rgba(60,220,255,.8), 0 2px 6px rgba(0,0,0,.8);
+  }
+  #level-progress-wrap {
+    width: 240px; height: 9px; margin: 7px auto 0;
+    background: rgba(4,12,24,.75); border: 1px solid rgba(80,220,255,.5);
+    border-radius: 2px; overflow: hidden;
+    box-shadow: 0 0 10px rgba(40,180,255,.35), inset 0 0 6px rgba(0,0,0,.8);
+  }
+  #level-progress-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg,#18d8ff,#7a4dff);
+    box-shadow: 0 0 8px rgba(60,220,255,.8);
+    transition: width .2s ease;
+  }
+  #level-progress-text { color: #8fd8ff; font-size: 12px; margin-top: 5px; letter-spacing: 2px; text-shadow: 0 0 6px rgba(40,180,255,.6); }
+
+  /* Boss 血条(顶部,关卡进度下方) */
+  #boss-panel {
+    position: fixed; top: 78px; left: 50%; transform: translateX(-50%);
+    text-align: center; z-index: 10; width: 420px;
+  }
+  #boss-panel.hidden { display: none; }
+  #boss-name {
+    color: #ff5d8a; font-size: 20px; font-weight: bold; letter-spacing: 6px;
+    text-shadow: 0 0 16px rgba(255,70,140,.95), 0 2px 6px rgba(0,0,0,.9);
+    animation: pulse 1.2s infinite;
+  }
+  #boss-hp-wrap {
+    width: 100%; height: 14px; margin-top: 6px;
+    background: rgba(20,4,10,.8); border: 1px solid rgba(255,80,140,.6);
+    border-radius: 2px; overflow: hidden;
+    box-shadow: 0 0 14px rgba(255,60,130,.45), inset 0 0 8px rgba(0,0,0,.9);
+  }
+  #boss-hp-fill {
+    height: 100%; width: 100%;
+    background: repeating-linear-gradient(90deg,#ff3d6a 0 18px, #a0123a 18px 20px);
+    box-shadow: 0 0 12px rgba(255,60,130,.9);
+    transition: width .15s ease;
+  }
+
+  /* 拾取提示 */
+  #pickup-msg {
+    position: fixed; left: 50%; top: 56%; transform: translateX(-50%);
+    color: #7ff0ff; font-size: 22px; font-weight: bold; letter-spacing: 3px;
+    text-shadow: 0 0 14px rgba(60,220,255,.9), 0 2px 8px rgba(0,0,0,.9);
+    z-index: 11; pointer-events: none;
+    opacity: 0; transition: opacity .15s;
+  }
+  #pickup-msg.show { opacity: 1; }
+
+  /* 左上: 敌人数量 */
+  #top-left {
+    position: fixed; top: 14px; left: 20px; z-index: 10;
+    color: #8fd8ff; font-size: 15px; letter-spacing: 2px;
+    text-shadow: 0 0 8px rgba(40,180,255,.6);
+  }
+  #top-left b { color: #ff5d8a; font-size: 18px; margin-left: 4px; text-shadow: 0 0 10px rgba(255,70,130,.8); }
+
+  /* 右上: 得分 / 击杀 */
+  #top-right { position: fixed; top: 14px; right: 22px; z-index: 10; text-align: right; }
+  #score {
+    color: #6ff0ff; font-size: 26px; font-weight: bold; letter-spacing: 2px;
+    text-shadow: 0 0 14px rgba(60,220,255,.85), 0 2px 6px rgba(0,0,0,.8);
+  }
+  #kills {
+    color: #9fc8e8; font-size: 14px; margin-top: 2px; letter-spacing: 2px;
+    text-shadow: 0 0 8px rgba(60,220,255,.5);
+  }
+
+  /* 左下: 装甲 */
+  #health-wrap { position: fixed; left: 24px; bottom: 20px; z-index: 10; }
+  #health-top {
+    display: flex; justify-content: space-between;
+    color: #9fe8ff; font-size: 13px; letter-spacing: 2px; margin-bottom: 5px;
+    text-shadow: 0 0 8px rgba(40,180,255,.6);
+  }
+  #health-bar {
+    width: 300px; height: 15px;
+    background: rgba(4,12,24,.75); border: 1px solid rgba(80,220,255,.5);
+    border-radius: 2px; overflow: hidden;
+    box-shadow: 0 0 10px rgba(40,180,255,.3), inset 0 0 6px rgba(0,0,0,.8);
+  }
+  #health-fill {
+    height: 100%; width: 100%;
+    background: repeating-linear-gradient(90deg,#18d8ff 0 14px, #0e7fb8 14px 16px);
+    box-shadow: 0 0 10px rgba(60,220,255,.8);
+    transition: width .12s ease, background .3s ease;
+  }
+
+  /* 右下: 能量弹药 */
+  #ammo { position: fixed; right: 28px; bottom: 16px; z-index: 10; text-align: right; }
+  #ammo-cur {
+    font-size: 52px; font-weight: bold; color: #6ff0ff;
+    font-family: Consolas, 'Courier New', monospace;
+    text-shadow: 0 0 16px rgba(60,220,255,.85), 0 2px 8px rgba(0,0,0,.8);
+  }
+  #ammo-slash { color: rgba(120,220,255,.5); font-size: 26px; margin: 0 4px; }
+  #ammo-reserve { font-size: 26px; color: #8fd8ff; font-family: Consolas, 'Courier New', monospace; text-shadow: 0 0 8px rgba(40,180,255,.6); }
+  #reload-hint {
+    font-size: 14px; color: #ff7ad9; margin-top: 4px; letter-spacing: 2px;
+    opacity: 0; transition: opacity .15s;
+    text-shadow: 0 0 10px rgba(255,90,220,.8);
+  }
+  #reload-hint.on { opacity: 1; animation: pulse 0.8s infinite; }
+
+  @keyframes pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+
+  /* ---------------- 全屏覆盖层 ---------------- */
+  .overlay {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+    background: radial-gradient(ellipse at center, rgba(4,10,22,.55), rgba(1,3,10,.92));
+    color: #dff4ff; text-align: center; cursor: pointer;
+  }
+  .overlay.show { display: flex; }
+  .overlay h1 {
+    font-size: 56px; letter-spacing: 12px; color: #eaffff;
+    text-shadow: 0 0 30px rgba(60,220,255,.8), 0 0 60px rgba(60,220,255,.4);
+  }
+  .overlay h1 span { color: #6ff0ff; }
+  .overlay .sub {
+    color: #7fa8cc; font-size: 14px; letter-spacing: 5px; margin-top: -8px;
+    text-shadow: 0 0 8px rgba(60,180,255,.4);
+  }
+  .panel {
+    background: rgba(5,12,26,.75); border: 1px solid rgba(80,220,255,.35);
+    border-radius: 4px; padding: 26px 40px;
+    clip-path: polygon(18px 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%, 0 18px);
+    box-shadow: 0 0 30px rgba(40,180,255,.2), inset 0 0 40px rgba(20,80,140,.15);
+  }
+  .panel h2 { font-size: 18px; letter-spacing: 5px; color: #6ff0ff; margin-bottom: 12px; text-shadow: 0 0 10px rgba(60,220,255,.7); }
+  .panel ul { list-style: none; line-height: 2.1; font-size: 16px; text-align: left; }
+  .panel b { color: #6ff0ff; font-weight: bold; text-shadow: 0 0 8px rgba(60,220,255,.6); }
+  .tip { margin-top: 12px; color: #8fb4d8; font-size: 14px; line-height: 1.9; }
+  .start-hint { margin-top: 6px; font-size: 18px; color: #7ff0ff; animation: pulse 1.4s infinite; letter-spacing: 3px; text-shadow: 0 0 12px rgba(60,220,255,.8); }
+  .stats { min-width: 320px; }
+  .stats div { font-size: 20px; line-height: 2.1; display: flex; justify-content: space-between; gap: 40px; }
+  .stats span { color: #6ff0ff; font-weight: bold; font-size: 24px; text-shadow: 0 0 10px rgba(60,220,255,.7); }
+
+  /* 加载失败提示 */
+  #load-error {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    z-index: 40; display: none; padding: 18px 28px;
+    background: rgba(60,10,20,.9); border: 1px solid #ff5d8a; border-radius: 4px;
+    color: #ffd9e2; font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="scanlines"></div>
+
+<!-- ================= HUD ================= -->
+<div id="hud">
+  <div id="crosshair"><div class="tick tl"></div><div class="tick tr"></div><div id="crosshair-dot"></div></div>
+  <div id="hitmarker"></div>
+  <div id="scope"></div>
+  <div id="boss-marker">▼ 小圆咪</div>
+  <div id="vignette-static"></div>
+  <div id="vignette"></div>
+  <div id="level-panel">
+    <div id="level-title">第 1 关 · 训练协议</div>
+    <div id="level-progress-wrap"><div id="level-progress-fill"></div></div>
+    <div id="level-progress-text">击杀 0 / 15</div>
+  </div>
+  <div id="boss-panel" class="hidden">
+    <div id="boss-name">小圆咪</div>
+    <div id="boss-hp-wrap"><div id="boss-hp-fill"></div></div>
+  </div>
+  <div id="pickup-msg"></div>
+  <div id="hint">WASD 移动 · 鼠标 瞄准/射击 · 右键 开镜放大 · R 充能 · 空格 跳跃 · Shift 疾跑 · M 静音</div>
+  <div id="top-left">敌方单位<b id="enemies-val">4</b></div>
+  <div id="top-right">
+    <div id="score">得分 <span id="score-val">0</span></div>
+    <div id="kills">击杀 <span id="kills-val">0</span></div>
+  </div>
+  <div id="health-wrap">
+    <div id="health-top"><span>装甲</span><span id="health-num">100</span></div>
+    <div id="health-bar"><div id="health-fill"></div></div>
+  </div>
+  <div id="ammo">
+    <span id="ammo-cur">30</span><span id="ammo-slash">/</span><span id="ammo-reserve">120</span>
+    <div id="reload-hint">充能中…</div>
+  </div>
+</div>
+
+<!-- ================= 开始菜单 ================= -->
+<div id="menu" class="overlay show">
+  <h1>NEO <span>STRIKE</span></h1>
+  <p class="sub">量子突击 · 星际实验室防御协议</p>
+  <div class="panel">
+    <h2>作战手册</h2>
+    <ul>
+      <li><b>W A S D</b> 移动 &nbsp;·&nbsp; <b>Shift</b> 疾跑 &nbsp;·&nbsp; <b>空格</b> 跳跃</li>
+      <li><b>鼠标</b> 瞄准 &nbsp;·&nbsp; <b>左键</b> 等离子步枪 &nbsp;·&nbsp; <b>右键</b> 开镜放大</li>
+      <li><b>R</b> 能量充能 &nbsp;·&nbsp; <b>M</b> 开关声音</li>
+    </ul>
+    <p class="tip">共 <b>3 个作战协议</b>,由易到难,击杀指定数量敌方单位即可过关。<br>击杀敌人会掉落 <b>能量电池 / 纳米医疗包</b>,走过去自动拾取。<br>身体中 3 枪击杀,<b>爆头一击必杀</b>。占领高台可获得视野优势!<br>小心 <b>猎杀者</b>:高速近战型机器人,会直冲你而来!<br>警惕持未来步枪的 <b>未来士兵</b>:三连发点射,射速凶猛!<br>击杀配额达标后,BOSS <b>「小圆咪」</b> 将登场,击败它才能进入下一关!</p>
+  </div>
+  <div class="start-hint">点击开始行动</div>
+</div>
+
+<!-- ================= 暂停 ================= -->
+<div id="pause" class="overlay">
+  <h2 style="font-size:34px; letter-spacing:8px;">行动暂停</h2>
+  <div class="start-hint">点击继续行动</div>
+</div>
+
+<!-- ================= 游戏结束 ================= -->
+<div id="gameover" class="overlay">
+  <h1 style="color:#ff5d8a; text-shadow:0 0 30px rgba(255,60,130,.6);">行动失败</h1>
+  <p class="sub" id="go-level">第 1 关 · 训练协议</p>
+  <div class="panel stats">
+    <div>最终得分 <span id="final-score">0</span></div>
+    <div>击杀敌人 <span id="final-kills">0</span></div>
+    <div>命中率 <span id="final-acc">-</span></div>
+  </div>
+  <div class="start-hint">点击重新挑战本协议</div>
+</div>
+
+<!-- ================= 关卡通过 ================= -->
+<div id="levelclear" class="overlay">
+  <h1 style="color:#6ff0ff; text-shadow:0 0 30px rgba(60,220,255,.7);">目标达成!</h1>
+  <p class="sub" id="lc-level">第 1 关 · 训练协议</p>
+  <div class="panel stats">
+    <div>本关用时 <span id="lc-time">0</span> 秒</div>
+    <div>通关奖励 <span id="lc-bonus">+0</span></div>
+    <div>当前总分 <span id="lc-score">0</span></div>
+  </div>
+  <div class="start-hint" id="lc-next">点击进入下一协议</div>
+</div>
+
+<!-- ================= 全部通关 ================= -->
+<div id="victory" class="overlay">
+  <h1 style="color:#ffd75e; text-shadow:0 0 30px rgba(255,210,90,.6);">全部通关!</h1>
+  <p class="sub">星际实验室已恢复安全</p>
+  <div class="panel stats">
+    <div>最终得分 <span id="vic-score">0</span></div>
+    <div>总击杀 <span id="vic-kills">0</span></div>
+    <div>命中率 <span id="vic-acc">-</span></div>
+  </div>
+  <div class="start-hint">点击重新开始</div>
+</div>
+
+<div id="load-error">Three.js 加载失败,请检查文件是否完整。</div>
+
+<!-- THREE -->
+<!-- GAME -->
+</body>
+</html>
